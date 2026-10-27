@@ -21,7 +21,7 @@ Merchant Center → **Connect** → **Manage connectors** → **Create connector
 | Name | `EcoLiving Price Feed Connector — <your name>` |
 | Key | `<yourname>-ecoliving-price-feed-connector` *(keys are unique in the organization: use your own name)* |
 | Repository URL | `https://github.com/commercetools/ecoliving-price-feed-connector.git` |
-| Tag | `v1.0.1` |
+| Tag | `v1.0.2` |
 | Private projects | the course project, e.g. `europe-west1.gcp:<project-key>` |
 | Supported regions | `europe-west1.gcp` |
 
@@ -37,7 +37,7 @@ Content-Type: application/json
   "name": "EcoLiving Price Feed Connector — <your name>",
   "description": "The nightly CSV to Import API price feed as a Connect Job app.",
   "creator": { "title": "Participant", "name": "<your name>", "email": "<your email>", "company": "<company>", "noOfDevelopers": 1 },
-  "repository": { "url": "https://github.com/commercetools/ecoliving-price-feed-connector.git", "tag": "v1.0.1" },
+  "repository": { "url": "https://github.com/commercetools/ecoliving-price-feed-connector.git", "tag": "v1.0.2" },
   "privateProjects": ["europe-west1.gcp:<project-key>"],
   "supportedRegions": ["europe-west1.gcp"]
 }
@@ -73,7 +73,7 @@ API client with exactly those scopes (`view_products`, `manage_products`, `manag
 
 | Key | Sample value | Note |
 |---|---|---|
-| `FEED_URL` **(required)** | `https://raw.githubusercontent.com/commercetools/ecoliving-price-feed-connector/main/samples/prices.csv` | the course feed; GitHub caches raw files for ~5 min |
+| `FEED_URL` **(required, pre-filled)** | `https://raw.githubusercontent.com/commercetools/ecoliving-price-feed-connector/main/samples/prices.csv` | the course feed, read on every run; GitHub caches raw files for ~5 min |
 | `FEED_SOURCE` | `csv` | |
 | `IMPORT_CONTAINER_KEY` | `lhc-price-feed` | the seeder (Session 7) creates it |
 | `FEED_CONTAINER` | `lhc-price-feed` | lock + last-run record |
@@ -87,23 +87,24 @@ API client with exactly those scopes (`view_products`, `manage_products`, `manag
 | `LOG_LEVEL` | `info` | |
 | `FEED_AUTH_HEADER` *(secured)* | *(empty)* | only for a protected file host |
 
-**Schedule:** the default is `0 2 * * *` (02:00 daily). For the demo, override it to `*/5 * * * *` (every five minutes) in the install form's schedule field, or with the
-`schedule` of the deployment's application configuration through the Connect API, and set it back afterwards.
+**Schedule:** every 15 minutes (`*/15 * * * *`), the course default, so a CSV edit shows up during the session. In
+production it would run nightly (`0 2 * * *`); a deployment can override it with the `schedule` of its application
+configuration. **Undeploy after the course**: it keeps calling GitHub and the Import API every 15 minutes.
 
 ## 5 · Verify it works
 
 When the deployment is **Deployed**:
 
-1. Wait for the next five-minute tick, then open the app's log: lock taken → feed read (rows, sha256) → SKUs resolved →
+1. Wait for the next 15-minute tick (:00, :15, :30, :45), then open the app's log: lock taken → feed read (rows, sha256) → SKUs resolved →
    batches submitted → ImportOperations settled → run recorded → lock released.
 2. With `DRY_RUN=true` the log lists the planned prices and stops. Redeploy with `DRY_RUN=false`.
 3. Change a price: edit `samples/prices.csv` (e.g. `CARM-023,EUR,DE,449.00`) in a fork or ask the trainer to commit it,
-   wait for the next tick (and GitHub's ~5-minute cache), and reload the storefront PLP in the DE/EUR store.
+   commit it a few minutes before a tick (GitHub caches raw files for ~5 minutes), and reload the storefront PLP in the DE/EUR store.
 4. Unchanged file? The log says **skipped**: the job compared the file's hash with the last good run.
 
 ## 6 · Tear down
 
-Undeploy (or set the schedule back to daily). The lock and last-run record stay in `lhc-price-feed`; delete them if you want a clean slate.
+Undeploy at the end of the course. The lock and last-run record stay in `lhc-price-feed`; delete them if you want a clean slate.
 
 ## If something fails
 

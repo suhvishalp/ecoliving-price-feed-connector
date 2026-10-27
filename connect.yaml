@@ -14,14 +14,18 @@ deployAs:
     applicationType: job
     endpoint: /price-feed
     properties:
-      schedule: '0 2 * * *' # 02:00 daily — overridable per deployment
+      # Course default: every 15 minutes, so a CSV edit shows up during the session. In production this would be
+      # a nightly run ('0 2 * * *'); the schedule is overridable per deployment either way.
+      schedule: '*/15 * * * *'
     configuration:
       standardConfiguration:
         - key: FEED_URL
           description: >-
             https:// URL of the price CSV (header row: sku,currency,country,amount). An S3 / Azure Blob /
-            GCS object, an SFTP gateway, or the raw samples/prices.csv of this repository for the course.
+            GCS object, an SFTP gateway, or the raw samples/prices.csv of this repository for the course
+            (the default). The file is fetched on every run, so a commit to it is picked up without a redeploy.
           required: true
+          default: 'https://raw.githubusercontent.com/commercetools/ecoliving-price-feed-connector/main/samples/prices.csv'
         - key: FEED_SOURCE
           description: csv (default) or custom-object (a { rows } document in FEED_CONTAINER/FEED_KEY, for rooms with no file host).
           required: false
