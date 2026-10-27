@@ -1,7 +1,9 @@
 # LHC Price-Feed Connector: commercetools Connect *(Import API, on a schedule)*
 
+> **Installing it in Merchant Center?** Follow [INSTALL.md](INSTALL.md): the steps and the sample values for every setting.
+
 One Connect **job** application: every night it reads a **CSV price file** and imports it through the
-**Import API**. It's split out of the Sessions 8–9 connector ([`lhc-order-flow-connector`](https://github.com/commercetools/lhc-order-flow-connector)) so it can
+**Import API**. It's split out of the Sessions 8–9 connector ([`ecoliving-order-connectors`](https://github.com/commercetools/ecoliving-order-connectors)) so it can
 be **installed on its own**, with its own least-privilege API client, on any project.
 
 It is **storefront-agnostic**. It writes prices to the platform, and every client reads them from there.
@@ -25,7 +27,7 @@ TypeScript only for now. A Java version of the same connector, for reference, co
 Connect deploys a **GitHub repository at a git tag**, and **`connect.yaml` must be at the repository
 root**. This connector is authored in the course build repo (`courses/b2c-dev/code/price-feed-connector/`) and synced
 with `./sync-connector.sh <repo>`
-to [`lhc-price-feed-connector`](https://github.com/commercetools/lhc-price-feed-connector), the same model as the Sessions 8–9 connector.
+to [`ecoliving-price-feed-connector`](https://github.com/commercetools/ecoliving-price-feed-connector), the same model as the Sessions 8–9 connector.
 
 ## The feed
 
