@@ -121,3 +121,33 @@ describe('reporting only this run', () => {
     expect(r.imported).toBe(1);
   });
 });
+
+describe('price-key reconciliation (the DuplicatePriceScope guard)', () => {
+  const row = { sku: 'CARM-023', currencyCode: 'EUR', centAmount: 44900, country: 'DE' };
+  const base = { productKey: 'charlie-armchair', variantKey: 'CARM-023', productId: 'prod-1', version: 7 };
+
+  it('uses the existing price key in the row scope, whatever it is', async () => {
+    const { planPriceKeys } = await import('../src/services/price-import.service.js');
+    const plan = planPriceKeys([row], new Map([['CARM-023', { ...base, prices: [{ id: 'p1', key: 'legacy-eur-de', currencyCode: 'EUR', country: 'DE' }] }]]));
+    expect(plan.get('CARM-023-EUR-DE')).toEqual({ importKey: 'legacy-eur-de' });
+  });
+
+  it('stamps the feed key on an unkeyed price in the scope before importing', async () => {
+    const { planPriceKeys } = await import('../src/services/price-import.service.js');
+    const plan = planPriceKeys([row], new Map([['CARM-023', { ...base, prices: [{ id: 'p1', currencyCode: 'EUR', country: 'DE' }, { id: 'p2', key: 'x', currencyCode: 'GBP', country: 'GB' }] }]]));
+    expect(plan.get('CARM-023-EUR-DE')).toEqual({ importKey: 'CARM-023-EUR-DE', stamp: { productId: 'prod-1', version: 7, priceId: 'p1', key: 'CARM-023-EUR-DE' } });
+  });
+
+  it('ignores channel / group / validity scoped prices and creates when the scope is free', async () => {
+    const { planPriceKeys } = await import('../src/services/price-import.service.js');
+    const plan = planPriceKeys([row], new Map([['CARM-023', { ...base, prices: [{ id: 'p1', currencyCode: 'EUR', country: 'DE', scoped: true }] }]]));
+    expect(plan.get('CARM-023-EUR-DE')).toEqual({ importKey: 'CARM-023-EUR-DE' });
+  });
+
+  it('importPrices uses the reconciled key', async () => {
+    const h = importApiRootWith([{ resourceKey: 'legacy-eur-de', state: 'imported' }]);
+    await importPrices(h.root, 'c', [row], new Map([['CARM-023', base]]), POLL, new Map([['CARM-023-EUR-DE', 'legacy-eur-de']]));
+    const body = (h.post.mock.calls[0] as unknown as [{ body: { resources: Array<{ key: string }> } }])[0].body;
+    expect(body.resources[0]!.key).toBe('legacy-eur-de');
+  });
+});

@@ -31,11 +31,29 @@ const TERMINAL_FAILURE = new Set(['validationFailed', 'rejected', 'canceled']);
  * upserts the price by the price's own `key`. Get this wrong and the import silently ADDS prices the
  * storefront never selects, instead of updating the ones it shows.
  */
+export interface ResolvedKeys {
+  productKey: string;
+  variantKey: string;
+  /** For key reconciliation (below): the product to update and the variant's CURRENT prices. */
+  productId?: string;
+  version?: number;
+  prices?: ExistingPrice[];
+}
+
+export interface ExistingPrice {
+  id: string;
+  key?: string;
+  currencyCode: string;
+  country?: string;
+  /** Any of these set = a different scope (channel / group / validity / recurrence) — never the feed's. */
+  scoped?: boolean;
+}
+
 export async function resolveKeys(
   apiRoot: ByProjectKeyRequestBuilder,
   skus: string[]
-): Promise<Map<string, { productKey: string; variantKey: string }>> {
-  const resolved = new Map<string, { productKey: string; variantKey: string }>();
+): Promise<Map<string, ResolvedKeys>> {
+  const resolved = new Map<string, ResolvedKeys>();
   if (skus.length === 0) return resolved;
 
   const { body } = await apiRoot
@@ -53,11 +71,79 @@ export async function resolveKeys(
     for (const variant of [product.masterVariant, ...(product.variants ?? [])]) {
       if (variant?.sku && skus.includes(variant.sku)) {
         // The seeder stamps variant key = SKU; fall back to that convention when the key is absent.
-        resolved.set(variant.sku, { productKey: product.key, variantKey: variant.key ?? variant.sku });
+        resolved.set(variant.sku, {
+          productKey: product.key,
+          variantKey: variant.key ?? variant.sku,
+          productId: product.id,
+          version: product.version,
+          prices: (variant.prices ?? []).map((p) => ({
+            id: p.id,
+            key: p.key,
+            currencyCode: p.value.currencyCode,
+            country: p.country,
+            scoped: Boolean(p.channel || p.customerGroup || p.validFrom || p.validUntil || p.recurrencePolicy),
+          })),
+        });
       }
     }
   }
   return resolved;
+}
+
+/**
+ * The Import API upserts a price BY KEY and never by scope: a key it does not know is a CREATE, and a second
+ * price in an existing scope (currency + country) is refused with DuplicatePriceScope. So for every row, decide
+ * which key the import must use: an existing keyed price in the row's scope → its key, whatever it is; an existing
+ * unkeyed one → the feed's key, stamped on it first (`setPriceKey` — the Import API cannot set keys); no price in
+ * that scope → the feed's key, and the import creates it. Pure: `reconcilePriceKeys` performs the stamps.
+ */
+export interface KeyPlan {
+  importKey: string;
+  stamp?: { productId: string; version: number; priceId: string; key: string };
+}
+
+export function planPriceKeys(rows: FeedRow[], keys: Map<string, ResolvedKeys>): Map<string, KeyPlan> {
+  const plan = new Map<string, KeyPlan>();
+  for (const row of rows) {
+    const feedKey = priceKeyFor(row);
+    const resolved = keys.get(row.sku);
+    const existing = resolved?.prices?.find(
+      (p) => !p.scoped && p.currencyCode === row.currencyCode && (p.country ?? null) === (row.country ?? null)
+    );
+    if (!existing) plan.set(feedKey, { importKey: feedKey });
+    else if (existing.key) plan.set(feedKey, { importKey: existing.key });
+    else if (resolved?.productId && resolved.version !== undefined)
+      plan.set(feedKey, { importKey: feedKey, stamp: { productId: resolved.productId, version: resolved.version, priceId: existing.id, key: feedKey } });
+    else plan.set(feedKey, { importKey: feedKey });
+  }
+  return plan;
+}
+
+/** Perform the plan's stamps (one product update each, current side) and return feed key → import key. */
+export async function reconcilePriceKeys(
+  apiRoot: ByProjectKeyRequestBuilder,
+  rows: FeedRow[],
+  keys: Map<string, ResolvedKeys>
+): Promise<Map<string, string>> {
+  const plan = planPriceKeys(rows, keys);
+  // A product's version moves with every stamp; keep our own counter per product so several rows of one product
+  // (EUR-DE, GBP-GB, …) do not race each other with a stale version.
+  const versions = new Map<string, number>();
+  for (const [feedKey, p] of plan) {
+    if (!p.stamp) continue;
+    const version = versions.get(p.stamp.productId) ?? p.stamp.version;
+    const { body } = await apiRoot
+      .products()
+      .withId({ ID: p.stamp.productId })
+      .post({ body: { version, actions: [{ action: 'setPriceKey', priceId: p.stamp.priceId, key: p.stamp.key, staged: false }] } })
+      .execute();
+    versions.set(p.stamp.productId, body.version);
+    logger.info('Stamped a key on an unkeyed price so the feed updates it instead of adding a duplicate', {
+      priceKey: feedKey,
+      productId: p.stamp.productId,
+    });
+  }
+  return new Map([...plan].map(([feedKey, p]) => [feedKey, p.importKey]));
 }
 
 /** Submit the feed in batches, then poll until every operation settles (or the budget runs out). */
@@ -66,7 +152,9 @@ export async function importPrices(
   containerKey: string,
   rows: FeedRow[],
   keys: Map<string, { productKey: string; variantKey: string }>,
-  poll: { timeoutSeconds: number; intervalSeconds: number; sleep?: (ms: number) => Promise<void> }
+  poll: { timeoutSeconds: number; intervalSeconds: number; sleep?: (ms: number) => Promise<void> },
+  /** feed key → the key the import must use (from `reconcilePriceKeys`); absent = the feed's key. */
+  importKeys?: Map<string, string>
 ): Promise<ImportReport> {
   const unresolved: RowOutcome[] = [];
   const submittable: FeedRow[] = [];
@@ -87,7 +175,7 @@ export async function importPrices(
     const resources = batch.map((row) => {
       const key = keys.get(row.sku)!;
       return {
-        key: priceKeyFor(row),
+        key: importKeys?.get(priceKeyFor(row)) ?? priceKeyFor(row),
         product: { typeId: 'product' as const, key: key.productKey },
         productVariant: { typeId: 'product-variant' as const, key: key.variantKey },
         value: {

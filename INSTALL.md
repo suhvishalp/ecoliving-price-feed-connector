@@ -21,7 +21,7 @@ Merchant Center → **Connect** → **Manage connectors** → **Create connector
 | Name | `EcoLiving Price Feed Connector — <your name>` |
 | Key | `<yourname>-ecoliving-price-feed-connector` *(keys are unique in the organization: use your own name)* |
 | Repository URL | `https://github.com/commercetools/ecoliving-price-feed-connector.git` |
-| Tag | `v1.0.2` |
+| Tag | `v1.0.3` |
 | Private projects | the course project, e.g. `europe-west1.gcp:<project-key>` |
 | Supported regions | `europe-west1.gcp` |
 
@@ -37,7 +37,7 @@ Content-Type: application/json
   "name": "EcoLiving Price Feed Connector — <your name>",
   "description": "The nightly CSV to Import API price feed as a Connect Job app.",
   "creator": { "title": "Participant", "name": "<your name>", "email": "<your email>", "company": "<company>", "noOfDevelopers": 1 },
-  "repository": { "url": "https://github.com/commercetools/ecoliving-price-feed-connector.git", "tag": "v1.0.2" },
+  "repository": { "url": "https://github.com/commercetools/ecoliving-price-feed-connector.git", "tag": "v1.0.3" },
   "privateProjects": ["europe-west1.gcp:<project-key>"],
   "supportedRegions": ["europe-west1.gcp"]
 }

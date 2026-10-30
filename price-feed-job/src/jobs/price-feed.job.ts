@@ -2,7 +2,8 @@ import { createApiRoot } from '../client/create.client.js';
 import { createImportApiRoot } from '../client/create.import.client.js';
 import { CsvFeedSource, CustomObjectFeedSource, type FeedBatch, type FeedSource } from '../services/feed.service.js';
 import { acquireLock } from '../services/lock.service.js';
-import { importPrices, resolveKeys } from '../services/price-import.service.js';
+import { importPrices, planPriceKeys, reconcilePriceKeys, resolveKeys, type ResolvedKeys } from '../services/price-import.service.js';
+import { priceKeyFor } from '../services/feed.service.js';
 import { isUnchanged, readLastRun, recordLastRun } from '../services/run-state.service.js';
 import { readConfiguration, type Configuration } from '../utils/config.utils.js';
 import { logger } from '../utils/logger.utils.js';
@@ -69,10 +70,13 @@ export async function runPriceFeed(): Promise<RunOutcome> {
 
     if (config.dryRun) return dryRunOutcome(feed, keys);
 
+    // Keys first: an unkeyed price in a row's scope would make the import ADD a duplicate (DuplicatePriceScope).
+    const importKeys = await reconcilePriceKeys(apiRoot, feed.rows, keys);
+
     const result = await importPrices(createImportApiRoot(), config.importContainerKey, feed.rows, keys, {
       timeoutSeconds: config.pollTimeoutSeconds,
       intervalSeconds: config.pollIntervalSeconds,
-    });
+    }, importKeys);
 
     logSettledRows(result.rows);
     const failed = result.failed + feed.rejected.length;
@@ -122,14 +126,21 @@ async function skipIfUnchanged(
   return { status: 'skipped', reason: 'feed unchanged since the last successful import' };
 }
 
-function dryRunOutcome(feed: FeedBatch, keys: Map<string, unknown>): RunOutcome {
+function dryRunOutcome(feed: FeedBatch, keys: Map<string, ResolvedKeys>): RunOutcome {
   const unknown = feed.rows.filter((r) => !keys.has(r.sku)).map((r) => r.sku);
+  const plan = planPriceKeys(feed.rows, keys);
+  const stamps = [...plan.values()].filter((p) => p.stamp).length;
+  const creates = [...plan].filter(([feedKey, p]) => !p.stamp && p.importKey === feedKey
+    && !keys.get(feed.rows.find((r) => priceKeyFor(r) === feedKey)!.sku)?.prices?.some((x) => x.key === feedKey)).length;
   logger.info('Dry run: nothing submitted', {
     source: feed.source,
     rows: feed.rows.length,
     resolvable: feed.rows.length - unknown.length,
     unknownSkus: [...new Set(unknown)],
     rejected: feed.rejected.length,
+    wouldUpdate: plan.size - stamps - creates,
+    wouldStampKeyThenUpdate: stamps,
+    wouldCreate: creates,
   });
   return {
     status: unknown.length > 0 || feed.rejected.length > 0 ? 'failed' : 'ok',
